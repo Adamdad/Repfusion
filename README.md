@@ -19,10 +19,12 @@ Basicly, we contain the code for distillation, the 3 downstream tasks including 
     # and knowledge distillation
     ├── configs/
         ├── <DATASET>-<DISTILL_LOSS>/
-                ddpm-<BACKBONE>_<DISTILL_LOSS>.py
-                # config file for Repfussion on <DATASET> 
-                # with <DISTILL_LOSS> as loss function 
-                # and <BACKBONE> as architecture
+            ddpm-<BACKBONE>_<DISTILL_LOSS>.py
+            # config file for Repfussion on <DATASET> 
+            # with <DISTILL_LOSS> as loss function 
+            # and <BACKBONE> as architecture
+        ├── baseline/
+            <BACKBONE>_<BATCHSIZE>_<DATASET>_finetune.py
     ├── mmcls/
         ├── models/
             ├── guided_diffusion/
@@ -37,8 +39,8 @@ Basicly, we contain the code for distillation, the 3 downstream tasks including 
 ├── landmark/
     # code for facial landmark detection 
     ├── configs/face/2d_kpt_sview_rgb_img/topdown_heatmap/wflw
-            <BACKBONE>_wflw_256x256_baseline_<BATCHSIZE>.py
-            <BACKBONE>_wflw_256x256_<BATCHSIZE>_repfussion.py
+        <BACKBONE>_wflw_256x256_baseline_<BATCHSIZE>.py
+        <BACKBONE>_wflw_256x256_<BATCHSIZE>_repfussion.py
             
 
 ├── segmentation/
