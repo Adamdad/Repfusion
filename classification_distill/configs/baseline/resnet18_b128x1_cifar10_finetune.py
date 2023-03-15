@@ -18,10 +18,10 @@ log_level = 'INFO'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
-
+data = dict(samples_per_gpu=64)
 # optimizer
 optimizer = dict(type='SGD',
-                 lr=0.1, momentum=0.9, weight_decay=0.0001)
+                 lr=0.1, momentum=0.9, weight_decay=0.0001, nesterov=True)
 optimizer_config = dict(grad_clip=None)
 # learning policy
 lr_config = dict(policy='step', step=[100, 150])
@@ -39,7 +39,8 @@ model = dict(
         style='pytorch',
         init_cfg=dict(type='Pretrained', 
                       prefix='student.backbone.',
-                      checkpoint='work_dirs/ddpm_resnet18_b128x1_cifar10_pretrain/latest.pth')),
+                      checkpoint='')
+                      ),
     neck=dict(
         type='GlobalAveragePooling'
     ),
