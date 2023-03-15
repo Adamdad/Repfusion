@@ -4,7 +4,8 @@ from curses import noecho
 import torch
 import torch.nn.functional as F
 from diffusers import DDPMScheduler
-from mmcls.models.guided_diffusion.load_model import create_imagenet256, create_imagenet64
+from mmcls.models.guided_diffusion.load_model import (create_imagenet64,
+                                                      create_imagenet256)
 from torch import nn, no_grad
 from torch.distributions import Categorical
 
@@ -12,8 +13,8 @@ from ..builder import (CLASSIFIERS, build_backbone, build_head, build_loss,
                        build_neck)
 from ..losses import AT, RKD
 from ..losses.norm_l2 import MSE_Norm_Loss
-from .kd_ddpm import (ComposeLoss, ForwardHookManager, KDDDPM_ImageClassifier,
-                      transpose)
+from .utils import (ComposeLoss, ForwardHookManager, KDDDPM_ImageClassifier,
+                    transpose)
 
 
 @CLASSIFIERS.register_module()
@@ -159,118 +160,6 @@ class KDDDPM_Pretrain_CleanDense_ImageClassifier(KDDDPM_ImageClassifier):
         losses = dict(loss_feat=feat_loss)
 
         return losses
-
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanDense_StrongWeak_ImageClassifier(KDDDPM_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=1000,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]], neck=None,
-                 head=None, pretrained=None, train_cfg=None, init_cfg=None):
-        super().__init__(backbone, teacher_layers, student_layers, model_id,
-                         distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.max_time_step = max_time_step
-        self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
-
-    def build_model(self, backbone, neck, head):
-        self.student = nn.ModuleDict(
-            {
-                'backbone': build_backbone(backbone),
-                'neck': build_neck(neck)
-            }
-        )
-
-    def train_step(self, data, optimizer):
-        """The iteration step during training.
-
-        This method defines an iteration step during training, except for the
-        back propagation and optimizer updating, which are done in an optimizer
-        hook. Note that in some complicated cases or models, the whole process
-        including back propagation and optimizer updating are also defined in
-        this method, such as GAN.
-
-        Args:
-            data (dict): The output of dataloader.
-            optimizer (:obj:`torch.optim.Optimizer` | dict): The optimizer of
-                runner is passed to ``train_step()``. This argument is unused
-                and reserved.
-
-        Returns:
-            dict: Dict of outputs. The following fields are contained.
-                - loss (torch.Tensor): A tensor for back propagation, which \
-                    can be a weighted sum of multiple losses.
-                - log_vars (dict): Dict contains all the variables to be sent \
-                    to the logger.
-                - num_samples (int): Indicates the batch size (when the model \
-                    is DDP, it means the batch size on each GPU), which is \
-                    used for averaging the logs.
-        """
-        losses = self(**data)
-        loss, log_vars = self._parse_losses(losses)
-
-        outputs = dict(
-            loss=loss, log_vars=log_vars, num_samples=len(data['img']['img'].data))
-
-        return outputs
-
-    def forward_train(self, img, strong, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-
-        gt_label = img['gt_label']
-        img = img['img']
-        strong_img = strong['img']
-        strong_label = strong['gt_label']
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-        # timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        probs = self.policy_net(img)
-        m = Categorical(probs)      # 生成分布
-        timesteps = m.sample()           # 从分布中采样
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, return_dict=False)
-        _ = self.extract_feat(self.student, img)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            if s_feat.shape != t_feat.shape:
-                s_feat = F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
-
-        reward = -(feat_loss.mean(-1).detach())
-        loss_policy = -(m.log_prob(timesteps) * reward).mean()
-
-        feat_loss = sum(feat_loss)/len(feat_loss)
-
-        losses = dict(loss_policy=loss_policy,
-                loss_cls=loss_cls,
-                reward = reward,
-                timesteps= timesteps.float(),
-                loss_feat=feat_loss)
-
-        return losses
     
 @CLASSIFIERS.register_module()
 class KDDDPM_Pretrain_CleanDense_HRNet_ImageClassifier(KDDDPM_ImageClassifier):
@@ -337,88 +226,6 @@ class KDDDPM_Pretrain_CleanDense_HRNet_ImageClassifier(KDDDPM_ImageClassifier):
 
         return losses
     
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanDenseContrast_ImageClassifier(KDDDPM_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=1000,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]], neck=None,
-                 head=None, pretrained=None, train_cfg=None, init_cfg=None):
-        super().__init__(backbone, teacher_layers, student_layers, model_id,
-                         distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.max_time_step = max_time_step
-        self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
-
-    def build_model(self, backbone, neck, head):
-        self.student = nn.ModuleDict(
-            {
-                'backbone': build_backbone(backbone),
-                'neck': build_neck(neck)
-            }
-        )
-
-    def info_nce(self, query, positive_key, temperature=0.1, reduction='none'):
-        # Check input dimensionality.
-        if query.dim() != 2:
-            raise ValueError('<query> must have 2 dimensions.')
-        if positive_key.dim() != 2:
-            raise ValueError('<positive_key> must have 2 dimensions.')
-
-        # Cosine between all combinations
-        query = F.normalize(query, dim=-1)
-        positive_key = F.normalize(positive_key, dim=-1)
-        logits = query @ transpose(positive_key)
-
-        # Positive keys are the entries on the diagonal
-        labels = torch.arange(len(query), device=query.device)
-
-        return F.cross_entropy(logits / temperature, labels, reduction=reduction)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, return_dict=False)
-        _ = self.extract_feat(self.student, img)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            if s_feat.shape != t_feat.shape:
-                s_feat = F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            
-            s_feat = s_feat.view(s_feat.size(0)*s_feat.size(2)*s_feat.size(3), -1)
-            t_feat = t_feat.view(t_feat.size(0)*t_feat.size(2)*t_feat.size(3), -1)
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(self.info_nce(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss)
-
-        losses = dict(loss_feat=feat_loss)
-
-        return losses
     
 @CLASSIFIERS.register_module()
 class KDDDPM_Pretrain_Clean_ImageClassifier(KDDDPM_ImageClassifier):
