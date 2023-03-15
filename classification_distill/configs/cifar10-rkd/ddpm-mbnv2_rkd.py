@@ -27,26 +27,18 @@ optimizer_config = dict(grad_clip=None)
 lr_config = dict(policy='step', step=[100, 150])
 runner = dict(type='EpochBasedRunner', max_epochs=200)
 
-find_unused_parameters = True
+
 # model settings
 model = dict(
-    type='KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier',
+    type='KDDDPM_RKD_TaskOriented_ImageClassifier',
     teacher_layers=[["mid_block.resnets.1.conv2", 256]],
-    student_layers=[['backbone.layer3.3.relu', 128]],
-    distill_fn=[['l2', 1.0]],
-    train_cfg=dict(kd_weight=1.,
-                entropy_reg=0.2),
-    backbone=dict(
-            type='WideResNet_CIFAR',
-            depth=28,
-            stem_channels=16,
-            base_channels=16 * 2,
-            num_stages=3,
-            strides=(1, 2, 2),
-            dilations=(1, 1, 1),
-            out_indices=(2, ),
-            out_channel=128,
-            style='pytorch'),
+    student_layers=[['backbone.conv2.activate', 1280]],
+    distill_fn=None,
+    train_cfg=dict(kd_weight=1.0,
+                entropy_reg=0.1),
+    backbone=dict(type='MobileNetV2_CIFAR',
+                     out_indices=(7, ),
+                     widen_factor=1.0),
     neck=dict(
         type='GlobalAveragePooling'
     ),
@@ -56,6 +48,5 @@ model = dict(
 custom_hooks = [
     dict(type='EntropyDecayHook', init_entropy_reg=0.1, end_epoch=100),
 ]
-
 
 evaluation = dict(interval=200, metric='accuracy')

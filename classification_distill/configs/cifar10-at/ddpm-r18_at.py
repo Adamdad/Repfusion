@@ -48,4 +48,9 @@ model = dict(
     head=None
 )
 
+custom_hooks = [
+    dict(type='EntropyDecayHook', init_entropy_reg=0.1, end_epoch=100),
+]
+
+
 evaluation = dict(interval=200, metric='accuracy')

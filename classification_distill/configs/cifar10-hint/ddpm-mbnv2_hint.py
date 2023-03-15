@@ -30,22 +30,23 @@ runner = dict(type='EpochBasedRunner', max_epochs=200)
 
 # model settings
 model = dict(
-    type='KDDDPM_AT_TaskOriented_ImageClassifier',
+    type='KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier',
     teacher_layers=[["mid_block.resnets.1.conv2", 256]],
-    student_layers=[['backbone.layer4.1.relu', 512]],
+    student_layers=[['backbone.conv2.activate', 1280]],
     distill_fn=None,
-    train_cfg=dict(kd_weight=1000,
-                   entropy_reg=0.09),
-    backbone=dict(
-        type='ResNet_CIFAR',
-        depth=18,
-        num_stages=4,
-        out_indices=(3, ),
-        style='pytorch'),
+    train_cfg=dict(kd_weight=1.,
+                entropy_reg=0.1),
+    backbone=dict(type='MobileNetV2_CIFAR',
+                     out_indices=(7, ),
+                     widen_factor=1.0),
     neck=dict(
         type='GlobalAveragePooling'
     ),
     head=None
 )
+custom_hooks = [
+    dict(type='EntropyDecayHook', init_entropy_reg=0.1, end_epoch=100),
+]
+
 
 evaluation = dict(interval=200, metric='accuracy')
