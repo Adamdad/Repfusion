@@ -43,7 +43,7 @@ model = dict(
     distill_fn=[['l2', 1.0]],
     teacher_dim=1024,
     num_class=1000,
-    teacher_ckp="/home/yangxingyi/guided-diffusion/256x256_diffusion_uncond.pt",
+    teacher_ckp="guided-diffusion/256x256_diffusion_uncond.pt",
     train_cfg=dict(kd_weight=1.),
     backbone=dict(type='ResNet',
                      depth=18,
@@ -55,5 +55,10 @@ model = dict(
     ),
     head=None
 )
+
+custom_hooks = [
+    dict(type='EntropyDecayHook', init_entropy_reg=0.1, end_epoch=100),
+    dict(type='EMAHook', momentum=0.001, priority='ABOVE_NORMAL')
+]
 
 evaluation = dict(interval=200, metric='accuracy')

@@ -1,6 +1,5 @@
 _base_ = [
-    '../_base_/datasets/tinyimagenet_bs128.py',
-    '../_base_/schedules/imagenet_bs1024_adamw_swin.py'
+    '../_base_/datasets/tinyimagenet_bs128.py'
 ]
 
 data = dict(
@@ -24,26 +23,11 @@ resume_from = None
 workflow = [('train', 1)]
 
 # optimizer
-optimizer = dict(
-    type='AdamW',
-    lr=5e-4 * 64 * 1 / 512)
-
-# optimizer
-lr_config = dict(
-    policy='CosineAnnealing',
-    by_epoch=False,
-    min_lr_ratio=1e-2)
-# lr_config = dict(
-#     policy='CosineAnnealing',
-#     by_epoch=False,
-#     min_lr_ratio=1e-2,
-#     warmup='linear',
-#     warmup_ratio=1e-3,
-#     warmup_iters=1000,
-#     warmup_by_epoch=False)
-
+optimizer = dict(type='SGD',
+                 lr=0.1, momentum=0.9, weight_decay=0.0001, nesterov=True)
+optimizer_config = dict(grad_clip=None)
 # learning policy
-# lr_config = dict(policy='step', step=[100, 150])
+lr_config = dict(policy='step', step=[100, 150])
 runner = dict(type='EpochBasedRunner', max_epochs=200)
 
 fp16 = dict(loss_scale=512.)
@@ -55,9 +39,9 @@ model = dict(
     distill_fn=[['l2', 1.0]],
     teacher_dim=768,
     num_class=200,
-    teacher_ckp="/home/yangxingyi/guided-diffusion/64x64_diffusion.pt",
+    teacher_ckp="guided-diffusion/64x64_diffusion.pt",
     train_cfg=dict(kd_weight=1.,
-                entropy_reg=0.0),
+                entropy_reg=0.1),
     backbone=dict(type='ResNet',
                      depth=18,
                      num_stages=4,
@@ -72,6 +56,7 @@ model = dict(
 
 custom_hooks = [
     dict(type='EntropyDecayHook', init_entropy_reg=0.00, end_epoch=100),
+    dict(type='EMAHook', momentum=0.001, priority='ABOVE_NORMAL')
 ]
 
 evaluation = dict(interval=200, metric='accuracy')

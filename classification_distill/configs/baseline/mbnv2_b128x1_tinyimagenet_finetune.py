@@ -2,9 +2,6 @@ _base_ = [
     '../_base_/datasets/tinyimagenet_bs128.py'
 ]
 
-data = dict(
-    samples_per_gpu=64,
-    workers_per_gpu=4)
 # checkpoint saving
 checkpoint_config = dict(interval=50)
 # yapf:disable
@@ -34,22 +31,20 @@ runner = dict(type='EpochBasedRunner', max_epochs=200)
 # model settings
 model = dict(
     type='ImageClassifier',
-    backbone=dict(
-        type='WideResNet_CIFAR',
-        depth=28,
-        stem_channels=16,
-        base_channels=16 * 2,
-        num_stages=3,
-        strides=(1, 2, 2),
-        dilations=(1, 1, 1),
-        out_indices=(2, ),
-        out_channel=128,
-        style='pytorch'),
-    neck=dict(type='GlobalAveragePooling'),
+    backbone=dict(type='MobileNetV2_CIFAR',
+                  out_indices=(7, ),
+                  widen_factor=1.0,
+                  init_cfg=dict(type='Pretrained',
+                                prefix='student.backbone.',
+                                checkpoint='')
+                  ),
+    neck=dict(
+        type='GlobalAveragePooling'
+    ),
     head=dict(
         type='LinearClsHead',
         num_classes=200,
-        in_channels=128,
+        in_channels=1280,
         loss=dict(type='CrossEntropyLoss', loss_weight=1.0),
         topk=(1, 5),
     )

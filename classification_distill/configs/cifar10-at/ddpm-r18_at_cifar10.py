@@ -50,6 +50,7 @@ model = dict(
 
 custom_hooks = [
     dict(type='EntropyDecayHook', init_entropy_reg=0.1, end_epoch=100),
+    dict(type='EMAHook', momentum=0.001, priority='ABOVE_NORMAL')
 ]
 
 

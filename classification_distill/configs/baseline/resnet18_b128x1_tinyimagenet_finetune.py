@@ -2,9 +2,6 @@ _base_ = [
     '../_base_/datasets/tinyimagenet_bs128.py'
 ]
 
-data = dict(
-    samples_per_gpu=64,
-    workers_per_gpu=4)
 # checkpoint saving
 checkpoint_config = dict(interval=50)
 # yapf:disable
@@ -38,11 +35,12 @@ model = dict(
         type='ResNet_CIFAR',
         depth=18,
         num_stages=4,
-        out_indices=(3,),
+        out_indices=(3, ),
         style='pytorch',
         init_cfg=dict(type='Pretrained', 
                       prefix='student.backbone.',
-                      checkpoint='work_dirs/ddpm-r18_rkd_tinyimagenet_max50/latest.pth')),
+                      checkpoint='')
+                      ),
     neck=dict(
         type='GlobalAveragePooling'
     ),

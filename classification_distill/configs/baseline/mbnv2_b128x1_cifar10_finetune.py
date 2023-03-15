@@ -49,3 +49,5 @@ model = dict(
         topk=(1, 5),
     )
 )
+
+custom_hooks = [dict(type='EMAHook', momentum=0.001, priority='ABOVE_NORMAL')]
