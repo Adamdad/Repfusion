@@ -1,12 +1,15 @@
 # Diffusion Model as Representation Learner
 
-
-This repository contains the official implementation of the ICCV 2023 submission
+This repository contains the official implementation of the ICCV 2023 paper
 
 **Diffusion Model as Representation Learner**
+Xingyi Yang, Xinchao Wang
 
+[[arxiv](https://arxiv.org/abs/2308.10916)] [[code](https://github.com/Adamdad/Repfusion)]
 
-> In this paper, we conduct an in-depth investigation of the representation power of DPMs, and propose a novel knowledge transfer method that leverages the knowledge acquired by generative DPMs for recognition tasks. We introduce a novel knowledge transfer paradigm named \textbf{RepFusion}. Our paradigm  extracts representations at different time steps from off-the-shelf DPMs and dynamically employs them as supervision for student networks, in which the optimal time is determined through reinforcement learning. 
+![tiser](assets/concept3_page-0001.jpg)
+
+> In this paper, we conduct an in-depth investigation of the representation power of DPMs, and propose a novel knowledge transfer method that leverages the knowledge acquired by generative DPMs for recognition tasks. We introduce a novel knowledge transfer paradigm named RepFusion. Our paradigm  extracts representations at different time steps from off-the-shelf DPMs and dynamically employs them as supervision for student networks, in which the optimal time is determined through reinforcement learning. 
 
 ## File Orgnizations
 
@@ -60,15 +63,19 @@ We mainly depend on 4 packages, namely
 4. `diffusers`. Install via `pip install --upgrade diffusers[torch]`, or go to the [official repo](https://github.com/huggingface/diffusers) for help.
 
 ## Data Preparation
-We use 5 datasets in our paper. Please put them all under the `data/<DATASET>`
-1. [ImageNet](https://www.image-net.org/). Please follow the official guideline.
-2. [TinyImageNet](http://cs231n.stanford.edu/tiny-imagenet-200.zip), please download dataset using this [script](https://github.com/DennisHanyuanXu/Tiny-ImageNet/blob/master/prep.sh).
-3. [CIAFR10](https://www.cs.toronto.edu/~kriz/cifar.html), `mmcls` will automatically download it for you. 
-4. [CelabAMask-HQ](https://github.com/switchablenorms/CelebAMask-HQ), and please follow the guideline on official repo.
-5. [WFLW](https://wywu.github.io/projects/LAB/WFLW.html). For WFLW data, please download images from [WFLW Dataset](https://wywu.github.io/projects/LAB/WFLW.html). Please download the annotation files from [wflw_annotations](https://download.openmmlab.com/mmpose/datasets/wflw_annotations.tar). 
+We use 4 datasets in our paper. Please put them all under the `data/<DATASET>`
+
+   
+1. [CelabAMask-HQ](https://github.com/switchablenorms/CelebAMask-HQ), and please follow the guideline on official repo.
+2. [WFLW](https://wywu.github.io/projects/LAB/WFLW.html). For WFLW data, please download images from [WFLW Dataset](https://wywu.github.io/projects/LAB/WFLW.html). Please download the annotation files from [wflw_annotations](https://download.openmmlab.com/mmpose/datasets/wflw_annotations.tar). 
+3. [TinyImageNet](http://cs231n.stanford.edu/tiny-imagenet-200.zip), please download dataset using this [script](https://github.com/DennisHanyuanXu/Tiny-ImageNet/blob/master/prep.sh).
+4. [CIAFR10](https://www.cs.toronto.edu/~kriz/cifar.html), `mmcls` will automatically download it for you. 
+
 
 ## Teacher Checkpoints
 - For DPMs based on huggingface, the model will be automatically downloaded. Just make sure you gets the correct model id, e.g.
+
+- For DPM on Tiny-ImageNet, we download it from the [guided-diffusion](https://github.com/openai/guided-diffusion) repo from the link [weight](https://openaipublic.blob.core.windows.net/diffusion/jul-2021/64x64_diffusion.pt).
    
 
 ## Training
@@ -98,6 +105,7 @@ model = dict(
     )
 ```
 
+
 - Do downstream training
 
 ```shell script
@@ -106,4 +114,14 @@ model = dict(
 # <TASK_NAME>: either 'classification_distill', 'segmentation' or 'landmark'
 cd <TASK_NAME>
 bash tools/dist_train.sh <CONFIG_NAME> <GPU_NUMS>
+```
+
+## Citation
+```bibtex
+@article{yang2023diffusion,
+    author    = {Xingyi Yang, Xinchao Wang},
+    title     = {Diffusion Model as Representation Learner},
+    journal   = {International Conference on Computer Vision (ICCV)},
+    year      = {2023},
+}
 ```

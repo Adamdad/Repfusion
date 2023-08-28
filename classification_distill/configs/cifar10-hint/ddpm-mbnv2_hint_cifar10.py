@@ -30,7 +30,7 @@ runner = dict(type='EpochBasedRunner', max_epochs=200)
 
 # model settings
 model = dict(
-    type='KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier',
+    type='Repfusion32_ImageClassifier',
     teacher_layers=[["mid_block.resnets.1.conv2", 256]],
     student_layers=[['backbone.conv2.activate', 1280]],
     distill_fn=None,

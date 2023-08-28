@@ -32,7 +32,7 @@ runner = dict(type='EpochBasedRunner', max_epochs=200)
 fp16 = dict(loss_scale=512.)
 # model settings
 model = dict(
-    type='KDDDPM_Pretrain_Imagenet64_ImageClassifier',
+    type='KDDDPM_AT_TaskOriented_ImageClassifier',
     teacher_layers=[["middle_block.2.out_layers.3", 768]],
     student_layers=[['backbone.layer4.1.relu', 512]],
     distill_fn=[['l2', 1.0]],

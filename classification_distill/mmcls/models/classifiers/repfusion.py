@@ -4,8 +4,7 @@ from curses import noecho
 import torch
 import torch.nn.functional as F
 from diffusers import DDPMScheduler
-from mmcls.models.guided_diffusion.load_model import (create_imagenet64,
-                                                      create_imagenet256)
+from mmcls.models.guided_diffusion.load_model import create_imagenet64
 from torch import nn, no_grad
 from torch.distributions import Categorical
 
@@ -13,91 +12,12 @@ from ..builder import (CLASSIFIERS, build_backbone, build_head, build_loss,
                        build_neck)
 from ..losses import AT, RKD
 from ..losses.norm_l2 import MSE_Norm_Loss
-from .utils import (ComposeLoss, ForwardHookManager, KDDDPM_ImageClassifier,
+from .utils import (ComposeLoss, ForwardHookManager, Repfusion_Base,
                     transpose)
 
-
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanDense_AT_ImageClassifier(KDDDPM_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=1000,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]], neck=None,
-                 head=None, pretrained=None, train_cfg=None, init_cfg=None):
-        super().__init__(backbone, teacher_layers, student_layers, model_id,
-                         distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.max_time_step = max_time_step
-        self.kd_weight = train_cfg['kd_weight']
-        # self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
-
-    def build_model(self, backbone, neck, head):
-        self.student = nn.ModuleDict(
-            {
-                'backbone': build_backbone(backbone),
-                'neck': build_neck(neck)
-            }
-        )
-    def init_distill_func(self, distill_fn):
-        self.distill_fn = AT(p=2)
-    def init_distill_layers(self, teacher_layers, student_layers):
-        assert len(student_layers) == len(
-            teacher_layers), "len(student_layers) must be equal to len(teacher_layers)"
-        # distill_layer = []
-        self.teacher_hoods = ForwardHookManager()
-        self.student_hoods = ForwardHookManager()
-        for t_layer, s_layer in zip(teacher_layers, student_layers):
-            t_layer_name, _ = t_layer
-            s_layer_name, _ = s_layer
-            self.student_hoods.add_hook(self.student, s_layer_name)
-            self.teacher_hoods.add_hook(self.ddpm, t_layer_name)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, return_dict=False)
-        _ = self.extract_feat(self.student, img)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat in zip(teacher_feat, student_feat):
-            # s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            #     s_feat = F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            
-            # assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
-
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-        losses = dict(loss_feat=feat_loss)
-
-        return losses
     
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanDense_ImageClassifier(KDDDPM_ImageClassifier):
+class KDDDPM_Pretrain_CleanDense_ImageClassifier(Repfusion_Base):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -162,7 +82,7 @@ class KDDDPM_Pretrain_CleanDense_ImageClassifier(KDDDPM_ImageClassifier):
         return losses
     
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanDense_HRNet_ImageClassifier(KDDDPM_ImageClassifier):
+class KDDDPM_Pretrain_CleanDense_HRNet_ImageClassifier(Repfusion_Base):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -227,8 +147,13 @@ class KDDDPM_Pretrain_CleanDense_HRNet_ImageClassifier(KDDDPM_ImageClassifier):
         return losses
     
     
+#########
+#########
+    
+
+
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_ImageClassifier(KDDDPM_ImageClassifier):
+class Repfusion_FixT_ImageClassifier(Repfusion_Base):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -282,9 +207,7 @@ class KDDDPM_Pretrain_Clean_ImageClassifier(KDDDPM_ImageClassifier):
             s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
             t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
 
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
             assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
             feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
 
         feat_loss = sum(feat_loss)/len(feat_loss)
@@ -295,7 +218,7 @@ class KDDDPM_Pretrain_Clean_ImageClassifier(KDDDPM_ImageClassifier):
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class Repfusion32_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -326,7 +249,6 @@ class KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_I
             self.entropy_reg = train_cfg['entropy_reg']
         else:
             self.entropy_reg = 0.1
-        # self.policy_net2 = PolicyNet_Cov()
 
     def forward_train(self, img, gt_label, **kwargs):
         """Forward computation during training.
@@ -386,109 +308,9 @@ class KDDDPM_Pretrain_Clean_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_I
                       timesteps=timesteps.float())
 
         return losses
-
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=1000,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.num_class = num_class
-        self.task_head = nn.Sequential(
-            nn.Linear(teacher_dim, teacher_dim//4),
-            nn.ReLU(True),
-            nn.Linear(teacher_dim//4, teacher_dim//4),
-            nn.ReLU(True),
-            nn.Linear(teacher_dim//4, num_class)
-        )
-        
-        self.policy_net = Policy_AlexNet()
-        self.kd_weight = train_cfg['kd_weight']
-        if 'entropy_reg' in train_cfg.keys():
-            self.entropy_reg = train_cfg['entropy_reg']
-        else:
-            self.entropy_reg = 0.1
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet256(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        probs = self.policy_net(img)
-        m = Categorical(probs)      # 生成分布
-        loss_entropy = -m.entropy() * self.entropy_reg
-        timesteps = m.sample()           # 从分布中采样
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(F.mse_loss(s_feat, t_feat.detach()))
-
-        teacher_logit = self.task_head(t_feat)
-        loss_teacher = F.cross_entropy(
-            teacher_logit, gt_label, reduction='none')
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-        # Find the time with smallest classification loss
-        reward = -(loss_teacher.detach())
-        loss_policy = -(m.log_prob(timesteps) * reward).mean()
-
-        losses = dict(loss_feat=feat_loss,
-                      loss_teacher=loss_teacher,
-                      loss_policy=loss_policy,
-                      loss_entropy=loss_entropy,
-                      timesteps=timesteps.float())
-
-        return losses
     
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet64_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class Repfusion_Imagenet64_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -587,577 +409,9 @@ class KDDDPM_Pretrain_Imagenet64_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Cl
 
         return losses
 
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet256_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet256(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(F.mse_loss(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-@CLASSIFIERS.register_module()
-class KDDDPM_AT_Imagenet64_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet64(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def init_distill_func(self, distill_fn):
-        self.distill_fn = AT(p=2)
-    def init_distill_layers(self, teacher_layers, student_layers):
-        assert len(student_layers) == len(
-            teacher_layers), "len(student_layers) must be equal to len(teacher_layers)"
-        # distill_layer = []
-        self.teacher_hoods = ForwardHookManager()
-        self.student_hoods = ForwardHookManager()
-        for t_layer, s_layer in zip(teacher_layers, student_layers):
-            t_layer_name, _ = t_layer
-            s_layer_name, _ = s_layer
-            self.student_hoods.add_hook(self.student, s_layer_name)
-            self.teacher_hoods.add_hook(self.ddpm, t_layer_name)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat in zip(teacher_feat, student_feat):
-            feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-
-@CLASSIFIERS.register_module()
-class KDDDPM_AT_Imagenet256_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet256(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def init_distill_func(self, distill_fn):
-        self.distill_fn = AT(p=2)
-    def init_distill_layers(self, teacher_layers, student_layers):
-        assert len(student_layers) == len(
-            teacher_layers), "len(student_layers) must be equal to len(teacher_layers)"
-        # distill_layer = []
-        self.teacher_hoods = ForwardHookManager()
-        self.student_hoods = ForwardHookManager()
-        for t_layer, s_layer in zip(teacher_layers, student_layers):
-            t_layer_name, _ = t_layer
-            s_layer_name, _ = s_layer
-            self.student_hoods.add_hook(self.student, s_layer_name)
-            self.teacher_hoods.add_hook(self.ddpm, t_layer_name)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat in zip(teacher_feat, student_feat):
-            feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-    
-
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet64_PolicyInfo_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        self.policy_net = Policy_AlexNet()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet64(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def info_nce(self, query, positive_key, temperature=0.2, reduction='none'):
-        # Check input dimensionality.
-        if query.dim() != 2:
-            raise ValueError('<query> must have 2 dimensions.')
-        if positive_key.dim() != 2:
-            raise ValueError('<positive_key> must have 2 dimensions.')
-
-        # Normalize to unit vectors
-        # query, positive_key, negative_keys = normalize(query, positive_key, negative_keys)
-   
-        # Negative keys are implicitly off-diagonal positive keys.
-
-        # Cosine between all combinations
-        query = F.normalize(query, dim=-1)
-        positive_key = F.normalize(positive_key, dim=-1)
-        logits = query @ transpose(positive_key)
-
-        # Positive keys are the entries on the diagonal
-        labels = torch.arange(len(query), device=query.device)
-
-        return F.cross_entropy(logits / temperature, labels, reduction=reduction)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        probs = self.policy_net(img)
-        m = Categorical(probs)      # 生成分布
-
-        timesteps = m.sample()           # 从分布中采样
-
-        # timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(F.mse_loss(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-        
-        reward = - (self.info_nce(t_feat.detach(), t_feat.detach()) ) # + feat_loss
-        # reward_norm = reward - reward.mean()
-        loss_policy = -(m.log_prob(timesteps) * reward)
-
-        losses = dict(loss_feat=feat_loss,
-                      loss_policy=loss_policy,
-                      timesteps=timesteps.float())
-
-        return losses
     
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet64_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet64(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(F.mse_loss(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-    
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Imagenet64_ImageClassifier_Minus(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet64(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(-F.mse_loss(F.normalize(s_feat), F.normalize(t_feat.detach())))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-    
-@CLASSIFIERS.register_module()
-class KDDDPM_RKD_Imagenet64_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
-    def __init__(self,
-                 backbone,
-                 teacher_layers,
-                 student_layers,
-                 max_time_step=50,
-                 model_id="google/ddpm-cifar10-32",
-                 distill_fn=[['l2', 1]],
-                 teacher_dim=1024,
-                 num_class=1000,
-                 teacher_ckp=None,
-                 neck=None,
-                 head=None,
-                 pretrained=None,
-                 train_cfg=None,
-                 init_cfg=None):
-        self.teacher_ckp = teacher_ckp
-        super().__init__(backbone, teacher_layers, student_layers, max_time_step,
-                         model_id, distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.kd_weight = train_cfg['kd_weight']
-        # self.policy_net2 = PolicyNet_Cov()
-    def init_ddpm_teacher(self,model_id):
-        self.ddpm = create_imagenet64(self.teacher_ckp)
-        for param in self.ddpm.parameters():
-            param.requires_grad = False
-
-    def init_distill_func(self, distill_fn):
-        self.distill_fn = RKD()
-
-    def init_distill_layers(self, teacher_layers, student_layers):
-        assert len(student_layers) == len(
-            teacher_layers), "len(student_layers) must be equal to len(teacher_layers)"
-        # distill_layer = []
-        self.teacher_hoods = ForwardHookManager()
-        self.student_hoods = ForwardHookManager()
-        for t_layer, s_layer in zip(teacher_layers, student_layers):
-            t_layer_name, _ = t_layer
-            s_layer_name, _ = s_layer
-            self.student_hoods.add_hook(self.student, s_layer_name)
-            self.teacher_hoods.add_hook(self.ddpm, t_layer_name)
-        # pass
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-        device = img.device
-        bs = img.shape[0]
-
-        timesteps = torch.randint(0, self.max_time_step, (bs,)).to(device)
-        _ = self.extract_feat(self.student, img)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat in zip(teacher_feat, student_feat):
-            # s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            # assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(self.distill_fn(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss) * self.kd_weight
-
-
-        losses = dict(loss_feat=feat_loss,
-                      timesteps=timesteps.float())
-
-        return losses
-    
-@CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Dense_Imagenet64_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_Pretrain_Dense_Imagenet64_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1230,7 +484,7 @@ class KDDDPM_Pretrain_Dense_Imagenet64_ImageClassifier(KDDDPM_Pretrain_Clean_Ima
         return losses
 
 @CLASSIFIERS.register_module()
-class KDDDPM_AT_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_AT_TaskOriented_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1339,7 +593,7 @@ class KDDDPM_AT_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifi
         return losses
     
 @CLASSIFIERS.register_module()
-class KDDDPM_RKD_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_RKD_TaskOriented_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1449,7 +703,7 @@ class KDDDPM_RKD_TaskOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassif
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_TaskOriented2_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_Pretrain_Clean_TaskOriented2_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1524,7 +778,7 @@ class KDDDPM_Pretrain_Clean_TaskOriented2_ImageClassifier(KDDDPM_Pretrain_Clean_
         return losses
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_StudentOriented_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_Pretrain_Clean_StudentOriented_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1641,7 +895,7 @@ class KDDDPM_Pretrain_Clean_StudentOriented_ImageClassifier(KDDDPM_Pretrain_Clea
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_TaskCommon_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_Pretrain_Clean_TaskCommon_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1789,7 +1043,7 @@ class KDDDPM_Pretrain_Clean_TaskCommon_ImageClassifier(KDDDPM_Pretrain_Clean_Ima
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_Clean_SingleT_ImageClassifier(KDDDPM_Pretrain_Clean_ImageClassifier):
+class KDDDPM_Pretrain_Clean_SingleT_ImageClassifier(Repfusion_FixT_ImageClassifier):
     def forward_train(self, img, gt_label, **kwargs):
         """Forward computation during training.
 
@@ -1836,7 +1090,7 @@ class KDDDPM_Pretrain_Clean_SingleT_ImageClassifier(KDDDPM_Pretrain_Clean_ImageC
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_CleanContrast_ImageClassifier(KDDDPM_ImageClassifier):
+class KDDDPM_Pretrain_CleanContrast_ImageClassifier(Repfusion_Base):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1925,7 +1179,7 @@ class KDDDPM_Pretrain_CleanContrast_ImageClassifier(KDDDPM_ImageClassifier):
 
 
 @CLASSIFIERS.register_module()
-class KDDDPM_Pretrain_MutiStep_ImageClassifier(KDDDPM_ImageClassifier):
+class KDDDPM_Pretrain_MutiStep_ImageClassifier(Repfusion_Base):
     def __init__(self,
                  backbone,
                  teacher_layers,
@@ -1997,98 +1251,6 @@ class KDDDPM_Pretrain_MutiStep_ImageClassifier(KDDDPM_ImageClassifier):
 
         return losses
 
-
-@CLASSIFIERS.register_module()
-class KDDDPM_PolicyNoise(KDDDPM_ImageClassifier):
-    def __init__(self, backbone, teacher_layers, student_layers, model_id="google/ddpm-cifar10-32", distill_fn=[['l2', 1]], neck=None, head=None, pretrained=None, train_cfg=None, init_cfg=None):
-        super().__init__(backbone, teacher_layers, student_layers, model_id,
-                         distill_fn, neck, head, pretrained, train_cfg, init_cfg)
-        self.policy_net = PolicyNet()
-        self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
-
-    def build_model(self, backbone, neck, head):
-        self.student = nn.ModuleDict(
-            {
-                'backbone': build_backbone(backbone),
-                'neck': build_neck(neck)
-            }
-        )
-
-    def info_nce(self, query, positive_key, temperature=0.1, reduction='none'):
-        # Check input dimensionality.
-        if query.dim() != 2:
-            raise ValueError('<query> must have 2 dimensions.')
-        if positive_key.dim() != 2:
-            raise ValueError('<positive_key> must have 2 dimensions.')
-
-        # Normalize to unit vectors
-        # query, positive_key, negative_keys = normalize(query, positive_key, negative_keys)
-
-        # Negative keys are implicitly off-diagonal positive keys.
-
-        # Cosine between all combinations
-        query = F.normalize(query, dim=-1)
-        positive_key = F.normalize(positive_key, dim=-1)
-        logits = query @ transpose(positive_key)
-
-        # Positive keys are the entries on the diagonal
-        labels = torch.arange(len(query), device=query.device)
-
-        return F.cross_entropy(logits / temperature, labels, reduction=reduction)
-
-    def forward_train(self, img, gt_label, **kwargs):
-        """Forward computation during training.
-
-        Args:
-            img (Tensor): of shape (N, C, H, W) encoding input images.
-                Typically these should be mean centered and std scaled.
-            gt_label (Tensor): It should be of shape (N, 1) encoding the
-                ground-truth label of input images for single label task. It
-                shoulf be of shape (N, C) encoding the ground-truth label
-                of input images for multi-labels task.
-        Returns:
-            dict[str, Tensor]: a dictionary of loss components
-        """
-        if self.augments is not None:
-            img, gt_label = self.augments(img, gt_label)
-
-        bs = img.shape[0]
-        device = img.device
-        probs = self.policy_net(img)
-        m = Categorical(probs)      # 生成分布
-
-        timesteps = m.sample()           # 从分布中采样
-
-        noise = torch.randn(img.shape).to(device)
-        noise_img = self.noise_scheduler.add_noise(
-            img, noise, timesteps).to(device)
-
-        with torch.no_grad():
-            _ = self.ddpm(img, timesteps, return_dict=False)
-        student_logit = self.get_logits(self.student, noise_img)
-
-        loss_cls = self.criterionCls(student_logit, gt_label)
-
-        teacher_feat = [hook.feat for hook in self.teacher_hoods.hook_list]
-        student_feat = [hook.feat for hook in self.student_hoods.hook_list]
-        feat_loss = []
-        for t_feat, s_feat, layer in zip(teacher_feat, student_feat, self.distill_layer):
-            s_feat = layer(s_feat)
-            # if s_feat.shape != t_feat.shape:
-            s_feat = F.adaptive_avg_pool2d(s_feat, (1, 1)).view(bs, -1)
-            t_feat = F.adaptive_avg_pool2d(t_feat, (1, 1)).view(bs, -1)
-
-            # F.interpolate(s_feat, size=(t_feat.size(2), t_feat.size(3)), mode='bilinear')
-            assert s_feat.shape == t_feat.shape
-            # print(s_feat.shape, t_feat.shape)
-            feat_loss.append(-self.distill_fn(s_feat, t_feat.detach()))
-
-        feat_loss = sum(feat_loss)/len(feat_loss)
-
-        losses = dict(loss_cls=loss_cls,
-                      loss_feat=feat_loss)
-
-        return losses
 
 
 class PolicyNet(nn.Module):
