@@ -7,7 +7,7 @@ Xingyi Yang, Xinchao Wang
 
 [[arxiv](https://arxiv.org/abs/2308.10916)] [[code](https://github.com/Adamdad/Repfusion)]
 
-![tiser](assets/concept3_page-0001.jpg)
+![tiser](assets/concept.jpg)
 
 > In this paper, we conduct an in-depth investigation of the representation power of DPMs, and propose a novel knowledge transfer method that leverages the knowledge acquired by generative DPMs for recognition tasks. We introduce a novel knowledge transfer paradigm named RepFusion. Our paradigm  extracts representations at different time steps from off-the-shelf DPMs and dynamically employs them as supervision for student networks, in which the optimal time is determined through reinforcement learning. 
 
